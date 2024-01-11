@@ -7,11 +7,10 @@ import {
   isValidAddress,
 } from "npm:avail-js-sdk";
 import config from "../config.ts";
-
 export const AirdropFunctionDefinition = DefineFunction({
   callback_id: "airdrop_avl",
   title: "Airdrop",
-  description: "let's get folks rich, shall we?",
+  description: "let's get rich folks, shall we?",
   source_file: "functions/airdrop.ts",
   input_parameters: {
     properties: {
@@ -32,77 +31,53 @@ export const AirdropFunctionDefinition = DefineFunction({
   },
   output_parameters: {
     properties: {
-      run: {
-        type: Schema.types.number,
-        description: "check",
-      },
-      user: {
-        type: Schema.slack.types.user_id,
-        description: "User the airdrop was sent to",
+      result: {
+        type: Schema.types.string,
+        description: "result",
       },
     },
-    required: ["run"],
+    required: ["result"],
   },
 });
 
 export default SlackFunction(
   AirdropFunctionDefinition,
-  async ({ inputs, client }) => {
-    const { address, amount, user } = inputs;
+  async ({ inputs }) => {
     try {
-      if (!isValidAddress(address)) throw new Error("Invalid Recipient");
+      const { address, amount, user } = inputs;
+      if (!isValidAddress(address)) {
+        const result = `txn failed due to invalid address`
+        return { outputs: { result } };
+      }
+  
       const api = await initialize(config.endpoint);
       const keyring = getKeyringFromSeed(config.seed);
       const options = { app_id: 0, nonce: -1 };
       const decimals = getDecimals(api);
       const _amount = formatNumberToBalance(amount, decimals);
-      const channelId = "C06CVL92NF7";
-      await api.tx.balances.transfer(
-        address,
-        _amount,
-      ).signAndSend(keyring, options, async ({ status, events }) => {
-        
-        if (status.isInBlock) {
-          events.forEach(async ({ event: { data, method, section } }) => {
-            try {
-              const result = await client.chat.postMessage({
-                channel: channelId,
-                text:
-                  `Transaction included at blockHash ${status.asInBlock} \t' ${section}.${method}:: ${data}\n for user ${user}`,
+  
+      const result: string = await new Promise((resolve, reject) => {
+        api.tx.balances
+          .transfer(address, _amount)
+          .signAndSend(keyring, options, ({ status, events }) => {
+            if (status.isInBlock) {
+              console.log(`Transaction included at blockHash ${status.asInBlock} for user ${user}`);
+              events.forEach(({ event: { data, method, section } }) => {
+                console.log(`\t' ${section}.${method}:: ${data}`);
               });
-              return result;
-            } catch (error) {
-              return error;
+              resolve(`Transaction successful with hash: ${status.asInBlock}`);
+            } else if (status.isFinalized) {
+              reject(`Transaction failed. Status: ${status}`);
             }
           });
-        } else {
-          try {
-            const result = await client.chat.postMessage({
-              channel: channelId,
-              text: `Txn failed for ${user}`,
-            });   
-            return result;
-          } catch (error) {
-            return error;
-          }
-        }
       });
-    } catch (err) {
-      const channelId = "C06CVL92NF7";
-      try {
-        const result = await client.chat.postMessage({
-          channel: channelId,
-          text: `Txn failed for ${user} due to ${err}`,
-        });   
-        return result;
-      } catch (error) {
-        return error;
-      }
+  
+      return { outputs: { result } }; 
+    } catch (error) {
+      console.error(error);
+      const result = `txn failed due to ${error}`
+      return { outputs: { result } };
     }
-
-    return new Promise((resolve, reject) => {
-      resolve({ outputs: {run: 1} });
-      reject({ outputs:  {run: 0}  });
-    });
-  },
+  }
+  
 );
