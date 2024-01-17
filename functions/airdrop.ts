@@ -1,5 +1,6 @@
 import { DefineFunction, Schema, SlackFunction } from "deno-slack-sdk/mod.ts";
 import {
+  disconnect,
   formatNumberToBalance,
   getDecimals,
   getKeyringFromSeed,
@@ -46,22 +47,24 @@ export default SlackFunction(
     try {
       const { address, amount, user } = inputs;
       if (!isValidAddress(address)) {
-        const result = `txn failed due to invalid address`
+        const result = `txn failed due to invalid address`;
         return { outputs: { result } };
       }
-  
+
       const api = await initialize(config.endpoint);
       const keyring = getKeyringFromSeed(config.seed);
       const options = { app_id: 0, nonce: -1 };
       const decimals = getDecimals(api);
       const _amount = formatNumberToBalance(amount, decimals);
-  
+
       const result: string = await new Promise((resolve, reject) => {
         api.tx.balances
           .transfer(address, _amount)
           .signAndSend(keyring, options, ({ status, events }) => {
             if (status.isInBlock) {
-              console.log(`Transaction included at blockHash ${status.asInBlock} for user ${user}`);
+              console.log(
+                `Transaction included at blockHash ${status.asInBlock} for user ${user}`,
+              );
               events.forEach(({ event: { data, method, section } }) => {
                 console.log(`\t' ${section}.${method}:: ${data}`);
               });
@@ -71,13 +74,14 @@ export default SlackFunction(
             }
           });
       });
-  
-      return { outputs: { result } }; 
+
+      return { outputs: { result } };
     } catch (error) {
       console.error(error);
-      const result = `txn failed due to ${error}`
+      const result = `txn failed due to ${error}`;
       return { outputs: { result } };
+    } finally {
+      await disconnect();
     }
-  }
-  
+  },
 );
